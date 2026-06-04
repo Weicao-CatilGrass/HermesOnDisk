@@ -1,6 +1,6 @@
 # HermesOnDisk
 
-It's a dump, stupid game archive system, but FAST.
+It's a dumb, stupid game archive system, but FAST.
 
 ## HOW TO USE
 

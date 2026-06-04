@@ -1,7 +1,7 @@
 // ┌─────────────────────────────────────────────────────────────────────────────────────┐
 // │ "The Hermes On Your Disk!".cs                                                       │
 // │                                                                                     │
-// │   It's a dump, stupid game archive system, but FAST.                                │
+// │   It's a dumb, stupid game archive system, but FAST.                                │
 // │                                                                                     │
 // │ # HOW TO IMPORT?                                                                    │
 // │                                                                                     │
@@ -196,7 +196,7 @@ namespace HermesOnDisk
         /// </summary>
         public static void Store()
         {
-            if (IsDirty) return;
+            if (!IsDirty) return;
             if (ModifiedByteMap.Count > 0) BackupPack();
             StoreAll();
         }
