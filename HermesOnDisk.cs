@@ -187,19 +187,30 @@ namespace HermesOnDisk
             var tmpIdxFile = _hermesPathfinder.RootDirectory.JoinToFile(PackIndexFile + ".tmp");
             tmpDataFile.Directory.Create();
 
+            var liveMap = liveEntries.ToDictionary(e => e.index, e => (e.data, e.oldLen));
+
             using (var dataFs = new FileStream(tmpDataFile.FullName, FileMode.Create, FileAccess.Write))
             using (var idxFs = new FileStream(tmpIdxFile.FullName, FileMode.Create, FileAccess.Write))
             {
                 byte[] indexBuffer = new byte[8];
-                foreach (var (idx, data, _) in liveEntries)
+                for (uint i = 0; i < (uint)numEntries; i++)
                 {
-                    uint newOffset = (uint)dataFs.Position;
-                    dataFs.Write(data, 0, data.Length);
+                    if (liveMap.TryGetValue(i, out var entry))
+                    {
+                        // Live entry: write data to pack, update index with new offset/length
+                        uint newOffset = (uint)dataFs.Position;
+                        dataFs.Write(entry.data, 0, entry.data.Length);
 
-                    BitConverter.GetBytes(newOffset).CopyTo(indexBuffer, 0);
-                    BitConverter.GetBytes((uint)data.Length).CopyTo(indexBuffer, 4);
+                        BitConverter.GetBytes(newOffset).CopyTo(indexBuffer, 0);
+                        BitConverter.GetBytes((uint)entry.data.Length).CopyTo(indexBuffer, 4);
+                    }
+                    else
+                    {
+                        // Dead entry: clear to zero (offset=0, length=0)
+                        Array.Clear(indexBuffer, 0, 8);
+                    }
 
-                    long idxPos = idx * 8;
+                    long idxPos = i * 8;
                     if (idxFs.Length < idxPos + 8)
                         idxFs.SetLength(idxPos + 8);
                     idxFs.Seek(idxPos, SeekOrigin.Begin);
@@ -355,7 +366,10 @@ namespace HermesOnDisk
         /// <param name="value">The byte array value to write.</param>
         private static void WriteByteArray(uint index, byte[] value)
         {
-            CacheByteMap[index] = value;
+            if (value != null)
+                CacheByteMap[index] = value;
+            else
+                CacheByteMap.Remove(index);
             ModifiedByteMap.Add(index);
         }
 
@@ -486,17 +500,24 @@ namespace HermesOnDisk
                 uint[] indices = ModifiedByteMap.ToArray();
                 foreach (uint index in indices)
                 {
-                    byte[] data = CacheByteMap[index];
-
                     // Read old pointer -> mark old space for GC
                     if (TryReadPackIndex(index, out uint oldOffset, out uint oldLen) && oldLen > 0)
                         AppendToGc(oldOffset, oldLen);
 
-                    // Append new data to pack.dat
-                    var (newOffset, newLen) = AppendToPack(data);
+                    if (CacheByteMap.TryGetValue(index, out byte[] data) && data != null)
+                    {
+                        // Append new data to pack.dat
+                        var (newOffset, newLen) = AppendToPack(data);
 
-                    // Update pack.idx pointer
-                    WritePackIndex(index, newOffset, newLen);
+                        // Update pack.idx pointer
+                        WritePackIndex(index, newOffset, newLen);
+                    }
+                    else
+                    {
+                        // Value is null (deleted): write zero offset/length to mark as empty slot
+                        WritePackIndex(index, 0, 0);
+                        CacheByteMap.Remove(index);
+                    }
                 }
 
                 ModifiedByteMap.Clear();
