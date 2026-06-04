@@ -35,8 +35,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
+#if UNITY_2020_1_OR_NEWER
+using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+#endif
+
 namespace HermesOnDisk
 {
+    #region Core
     // ┌───────────┐
     // │   USAGE   │
     // └───────────┘
@@ -45,37 +53,107 @@ namespace HermesOnDisk
         private void YourMain()
         {
             // Set save location
-            HermesOnDisk.Root = new DirectoryInfo(".");
+            Hermes.Root = new DirectoryInfo(".");
 
             // Read boolean
-            var doorOpened = HermesOnDisk.Boolean[2];
+            var doorOpened = Hermes.Boolean[2];
 
             // Set boolean
-            HermesOnDisk.Boolean[0] = true;
+            Hermes.Boolean[0] = true;
 
             // Read float
-            var health = HermesOnDisk.Float[0];
+            var health = Hermes.Float[0];
 
             // Set float
-            HermesOnDisk.Float[0] = 0;
+            Hermes.Float[0] = 0;
 
             // Read name
-            var name = HermesOnDisk.String[0];
+            var name = Hermes.String[0];
 
             // Set name
-            HermesOnDisk.String[0] = "Peter";
+            Hermes.String[0] = "Peter";
 
             // Save
-            HermesOnDisk.Store();
+            Hermes.Store();
 
             // Garbage collect variable-length data
-            HermesOnDisk.GC();
+            Hermes.GC();
         }
     }
 
+#if UNITY_2020_1_OR_NEWER
+#else
     public static class HermesOnDisk
     {
+        /// <summary>
+        /// Returns true if there are uncommitted changes in memory.
+        /// </summary>
+        public static bool IsDirty => Hermes.IsDirty;
+
+        /// <summary>
+        /// Boolean indexer
+        /// </summary>
+        public static Hermes.BoolIndexer Boolean => Hermes.Boolean;
+
+        /// <summary>
+        /// Float indexer
+        /// </summary>
+        public static Hermes.FloatIndexer Float => Hermes.Float;
+
+        /// <summary>
+        /// String indexer
+        /// </summary>
+        public static Hermes.StringIndexer String => Hermes.String;
+
+        /// <summary>
+        /// Variable-length byte array indexer
+        /// </summary>
+        public static Hermes.ByteIndexer Bytes => Hermes.Bytes;
+
+        /// <summary>
+        /// Root directory
+        /// </summary>
+        public static DirectoryInfo Root
+        {
+            get => Hermes.Root;
+            set => Hermes.Root = value;
+        }
+
+        /// <summary>
+        /// Store to disk
+        /// </summary>
+        public static void Store()
+            => Hermes.Store();
+
+        /// <summary>
+        /// Asynchronously fully rewrites pack.dat
+        /// </summary>
+        public static void AsyncGC()
+            => Hermes.AsyncGC();
+
+        /// <summary>
+        /// Full rewrite of pack.dat, reclaiming freed space
+        /// </summary>
+        public static void GC()
+            => Hermes.GC();
+
+        /// <summary>
+        /// Backup pack.dat → pack.dat.backup
+        /// </summary>
+        public static void BackupPack()
+            => Hermes.BackupPack();
+    }
+#endif
+
+    public static class Hermes
+    {
         private static HermesPathfinder _hermesPathfinder = new(new DirectoryInfo("."));
+
+        /// <summary>
+        /// Returns true if there are uncommitted changes in memory.
+        /// </summary>
+        public static bool IsDirty =>
+            ModifiedBooleans.Count > 0 || ModifiedFloat.Count > 0 || ModifiedByteMap.Count > 0;
 
         // ┌─────────────────────────────────────────────┐
         // │  Pack file constants (COW + pointer table)  │
@@ -118,7 +196,7 @@ namespace HermesOnDisk
         /// </summary>
         public static void Store()
         {
-            if (ModifiedBooleans.Count == 0 && ModifiedFloat.Count == 0 && ModifiedByteMap.Count == 0) return;
+            if (IsDirty) return;
             if (ModifiedByteMap.Count > 0) BackupPack();
             StoreAll();
         }
@@ -185,7 +263,7 @@ namespace HermesOnDisk
 
             var tmpDataFile = _hermesPathfinder.RootDirectory.JoinToFile(PackDataFile + ".tmp");
             var tmpIdxFile = _hermesPathfinder.RootDirectory.JoinToFile(PackIndexFile + ".tmp");
-            tmpDataFile.Directory.Create();
+            if (tmpDataFile.Directory != null) tmpDataFile.Directory.Create();
 
             var liveMap = liveEntries.ToDictionary(e => e.index, e => (e.data, e.oldLen));
 
@@ -709,10 +787,10 @@ namespace HermesOnDisk
             {
                 get
                 {
-                    var data = HermesOnDisk.Bytes[index];
+                    var data = Hermes.Bytes[index];
                     return data != null ? System.Text.Encoding.UTF8.GetString(data) : null;
                 }
-                set => HermesOnDisk.Bytes[index] = value != null ? System.Text.Encoding.UTF8.GetBytes(value) : null;
+                set => Hermes.Bytes[index] = value != null ? System.Text.Encoding.UTF8.GetBytes(value) : null;
             }
         }
     }
@@ -814,11 +892,96 @@ namespace HermesOnDisk
             return new DirectoryInfo(full);
         }
 
-
         public static FileInfo JoinToFile(this DirectoryInfo dir, params string[] paths)
         {
             string full = Path.Combine(dir.FullName, Path.Combine(paths));
             return new FileInfo(full);
         }
     }
+    #endregion
+
+    #region UNITY
+#if UNITY_2020_1_OR_NEWER
+
+    public class HermesOnDisk : MonoBehaviour
+    {
+        private enum SaveLocationType
+        {
+            PersistentDataPath,
+            TemporaryCachePath
+        }
+
+        /// <summary>
+        /// Returns true if there are uncommitted changes in memory.
+        /// </summary>
+        public static bool IsDirty => Hermes.IsDirty;
+
+        /// <summary>
+        /// Boolean indexer
+        /// </summary>
+        public static Hermes.BoolIndexer Boolean => Hermes.Boolean;
+
+        /// <summary>
+        /// Float indexer
+        /// </summary>
+        public static Hermes.FloatIndexer Float => Hermes.Float;
+
+        /// <summary>
+        /// String indexer
+        /// </summary>
+        public static Hermes.StringIndexer String => Hermes.String;
+
+        /// <summary>
+        /// Variable-length byte array indexer
+        /// </summary>
+        public static Hermes.ByteIndexer Bytes => Hermes.Bytes;
+
+        [Header("Save Location")]
+        [SerializeField] private SaveLocationType saveLocation = SaveLocationType.PersistentDataPath;
+        [SerializeField] private string relativePath = "Saves";
+
+        private void Awake()
+        {
+            string basePath = saveLocation switch
+            {
+                SaveLocationType.PersistentDataPath => Application.persistentDataPath,
+                SaveLocationType.TemporaryCachePath => Application.temporaryCachePath,
+                _ => Application.persistentDataPath
+            };
+
+            string root = Path.Combine(basePath, relativePath);
+            Hermes.Root = new DirectoryInfo(root);
+        }
+
+        private void OnDestroy()
+        {
+            Hermes.Store();
+        }
+
+        [ContextMenu("GC And Store")]
+        public void DoGCAndSave()
+        {
+            Hermes.GC();
+            Hermes.Store();
+        }
+
+        [ContextMenu("GC")]
+        public void DoGC()
+        {
+            Hermes.GC();
+        }
+
+        [ContextMenu("Store")]
+        public void DoStore()
+        {
+            Hermes.Store();
+        }
+
+        public void Save() => Hermes.Store();
+        public void GC() => Hermes.GC();
+    }
+
+#endif
+
+    #endregion
 }
